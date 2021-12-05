@@ -9,3 +9,4 @@ license = "AGPL-3.0-only"
 [dependencies]
 syntect = "4.6.0"
 itertools = "0.10"
+clap = "2.34.0"
