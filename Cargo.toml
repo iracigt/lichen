@@ -8,6 +8,3 @@ edition = "2021"
 [dependencies]
 syntect = "4.6.0"
 itertools = "0.10"
-
-[build-dependencies]
-cc = "1.0"
