@@ -6,12 +6,12 @@
 
 #### Binary Installation
 ```sh
-$ cargo install --git ...
+$ cargo install --git https://github.com/iracigt/lichen.git
 ```
 
 #### Development
 ```sh
-$ git clone
+$ git clone https://github.com/iracigt/lichen.git
 $ cd lichen
 $ cargo build --release
 $ target/release/lichen ...
