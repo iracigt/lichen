@@ -36,10 +36,6 @@ impl<T, I : Iterator<Item = T>, F : Fn(usize, ElemIter<T>) -> H, H> Iterator for
 
         Some(h)
     }
-}   
-
-pub fn ngramify<T : Clone>(_: usize, iter: ElemIter<T>) -> Vec<T> {
-    iter.cloned().collect()
 }
 
 pub fn default<T : Hash>(_: usize, iter: ElemIter<T>) -> u64 {
