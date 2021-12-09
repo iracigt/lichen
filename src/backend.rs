@@ -115,9 +115,13 @@ where
                 count += 1;
                 match self.map.get(&h) {
                     Some(hits) => {
-                        for hit in hits {
-                            if hit != this {
-                                *matchmap.entry(hit).or_insert(0) += 1;
+                        // There are many more efficent ways to do this
+                        // But this was easy
+                        if hits.iter().all(|s| !s.is_allowed()) {
+                            for hit in hits {
+                                if hit != this {
+                                    *matchmap.entry(hit).or_insert(0) += 1;
+                                }
                             }
                         }
                     },

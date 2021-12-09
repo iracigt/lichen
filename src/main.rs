@@ -3,12 +3,14 @@ mod frontend;
 mod syntect_frontend;
 mod backend;
 
-use std::ffi::OsStr;
+use std::{ffi::OsStr, path::Path};
 use std::fs;
 
 use clap::{App, Arg};
 use backend::{Backend, default_hash};
 use frontend::Submission;
+use itertools::Itertools;
+use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
 use syntect_frontend::SyntectFE;
 
@@ -62,8 +64,32 @@ fn main() {
             ).number_of_values(1),
     )
     .arg(
+        Arg::with_name("blessed")
+            .help("set of allowed sources")
+            .short("b")
+            .long("bless")
+            .multiple(true)
+            .number_of_values(1),
+    )
+    .arg(
+        Arg::with_name("corpus")
+            .help("set of disallowed sources")
+            .short("c")
+            .long("corpus")
+            .multiple(true)
+            .number_of_values(1),
+    )
+    .arg(
+        Arg::with_name("filter")
+            .help("filter source files to process by regex")
+            .short("f")
+            .long("filter")
+            .multiple(false)
+            .number_of_values(1),
+    )
+    .arg(
         Arg::with_name("input")
-            .help("the input directory to use")
+            .help("the input directory of student submissions")
             .index(1)
             .required(true),
     )
@@ -77,17 +103,41 @@ fn main() {
     fe.add_ignore("meta");
     fe.add_ignore("comment");
 
-    let dir = matches.value_of("input").unwrap();
-    let paths = fs::read_dir(dir).unwrap();
-    
-    let submissions : Vec<Submission<Scope>> = paths.filter_map(|r| {
+    let blessed = matches.values_of("blessed").map_or(vec!(), |v| v.collect_vec());
+    let allowed = blessed.iter().map(|d| fs::read_dir(d).unwrap()).flatten().filter_map(|r| {
         r.map_err(|e| e.to_string()).and_then( |e| {
             let path = e.path();
-            let user = path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
-            let src = frontend::Source::student(user);
-            
+            let src = frontend::Source::allowed();            
             Submission::single_file(&fe, src, &path)
         }).map_err(|e| println!("ERR: {}", e)).ok()
+    }).collect_vec();
+
+    let cursed = matches.values_of("corpus").map_or(vec!(), |v| v.collect_vec());
+    let corpus = cursed.iter().map(|d| fs::read_dir(d).unwrap()).flatten().filter_map(|r| {
+        r.map_err(|e| e.to_string()).and_then( |e| {
+            let path = e.path();
+            let group = path.parent().and_then(Path::to_str).unwrap_or("unknown");
+            let desc = path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
+            let src = frontend::Source::corpus(group, desc);            
+            Submission::single_file(&fe, src, &path)
+        }).map_err(|e| println!("ERR: {}", e)).ok()
+    }).collect_vec();
+    
+
+    let filt_regex = matches.value_of("filter").map(|r| Regex::new(r).expect("invalid regex"));
+    let dir = matches.value_of("input").unwrap();
+    let submissions : Vec<Submission<Scope>> = fs::read_dir(dir).unwrap().filter_map(|r| {
+        let e = r.unwrap();
+        let path = e.path();
+        let name = path.file_name().and_then(OsStr::to_str);
+        let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
+        let src = frontend::Source::student(user);
+        
+        if filt_regex.as_ref().and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
+            Submission::single_file(&fe, src, &path).map_err(|e| println!("ERR: {}", e)).ok()
+        } else {
+            None
+        }
     }).collect();
 
     let n = matches.value_of("ngram").expect("No ngram length provided")
@@ -96,6 +146,14 @@ fn main() {
     let mut backend= Backend::new(n, |n, i| default_hash(n, i));
 
     // submissions.first().unwrap().units().next().unwrap().tokens().for_each(|t| println!("{}", t));
+
+    for sub in &allowed {
+        backend.populate(sub);
+    }
+
+    for sub in &corpus {
+        backend.populate(sub);
+    }
 
     for sub in &submissions {
         backend.populate(sub);
