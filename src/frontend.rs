@@ -107,6 +107,10 @@ where
         Ok(Self { src,  units : vec![ CodeUnit::from_path(t, path)? ] } )
     }
 
+    pub fn files<'a, F: Tokenizer<T>, I: Iterator<Item = &'a Path>>(t: &F, src: Source, paths: I) -> Result<Self, String> {
+        Ok(Self { src,  units : paths.map(|p| CodeUnit::from_path(t, p)).collect::<Result<Vec<CodeUnit<T>>, String>>()? } )
+    }
+
     pub fn units(&self) -> impl Iterator<Item = &CodeUnit<T>> {
         self.units.iter()
     }

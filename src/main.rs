@@ -3,6 +3,7 @@ mod frontend;
 mod syntect_frontend;
 mod backend;
 
+use std::path::PathBuf;
 use std::{ffi::OsStr, path::Path};
 use std::fs;
 
@@ -13,6 +14,7 @@ use itertools::Itertools;
 use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
 use syntect_frontend::SyntectFE;
+use walkdir::WalkDir;
 
 const DEF_N : &str = "16";
 const DEF_THRESH_J: &str = "0.8";
@@ -124,19 +126,53 @@ fn main() {
     }).collect_vec();
     
 
+    // let filt_regex = matches.value_of("filter").map(|r| Regex::new(r).expect("invalid regex"));
+    // let dir = matches.value_of("input").unwrap();
+    // let submissions : Vec<Submission<Scope>> = fs::read_dir(dir).unwrap().filter_map(|r| {
+    //     let e = r.unwrap();
+    //     let path = e.path();
+    //     let name = path.file_name().and_then(OsStr::to_str);
+    //     let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
+    //     let src = frontend::Source::student(user);
+        
+    //     if filt_regex.as_ref().and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
+    //         Submission::single_file(&fe, src, &path).map_err(|e| println!("ERR: {}", e)).ok()
+    //     } else {
+    //         None
+    //     }
+    // }).collect();
+
+
     let filt_regex = matches.value_of("filter").map(|r| Regex::new(r).expect("invalid regex"));
     let dir = matches.value_of("input").unwrap();
     let submissions : Vec<Submission<Scope>> = fs::read_dir(dir).unwrap().filter_map(|r| {
-        let e = r.unwrap();
-        let path = e.path();
-        let name = path.file_name().and_then(OsStr::to_str);
-        let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
-        let src = frontend::Source::student(user);
+        let path = r.unwrap().path();
+
+        if path.is_dir() {
+            let user =  path.file_name().and_then(OsStr::to_str).unwrap_or("unknown");
+            let src = frontend::Source::student(user);
+            let walk = WalkDir::new(path);
+            let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
+                .filter_ok(|d| !d.path().is_dir())
+                .map_ok(|r| r.into_path()).collect::<Result<Vec<PathBuf>, String>>().unwrap();
         
-        if filt_regex.as_ref().and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-            Submission::single_file(&fe, src, &path).map_err(|e| println!("ERR: {}", e)).ok()
+            let paths = f.iter().filter(|p| {
+                let name = p.file_name();
+                filt_regex.as_ref().and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
+            });
+
+            Submission::files(&fe, src, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
+            
         } else {
-            None
+            let name = path.file_name().and_then(OsStr::to_str);
+            let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
+            let src = frontend::Source::student(user);
+
+            if filt_regex.as_ref().and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
+                Submission::single_file(&fe, src, &path).map_err(|e| println!("ERR: {}", e)).ok()
+            } else {
+                None
+            }
         }
     }).collect();
 

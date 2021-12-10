@@ -181,6 +181,7 @@ dependencies = [
  "itertools",
  "onig",
  "syntect",
+ "walkdir",
 ]
 
 [[package]]

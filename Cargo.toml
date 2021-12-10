@@ -11,3 +11,4 @@ syntect = "4.6.0"
 itertools = "0.10"
 clap = "2.34.0"
 onig = { version = "6.0", default-features = false }
+walkdir = "2"
