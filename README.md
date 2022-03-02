@@ -96,3 +96,9 @@ $ lichen -b handout/ -c old_submissions/ ~/Downloads/submissions
 ## License
 
 GNU Affero General Public License v3.0. See [LICENSE](LICENSE) for details.
+
+## Similar Systems
+
+This was heavily influenced by MOSS by Aiken at Stanford ([Website](https://theory.stanford.edu/~aiken/moss/), [Paper](http://theory.stanford.edu/~aiken/publications/papers/sigmod03.pdf)). The main algorithmic difference is I do not use the winnowing approach and instead just match against all hashes. The key motivators for this project were MOSS' closed source implementation and limited language support, specifically the lack of Scala.
+
+This project has no relation to the work from Rensselaer Center for Open Source Software also called Lichen ([Website](https://submitty.org/instructor/course_management/plagiarism), [Paper](https://dl.acm.org/doi/10.1145/3287324.3293867)). Turns out someone else appreciated this pun and had used it for a similar project three years prior to mine. Overall, our approaches seem to be quite alike: leverage programming editor language frontends, hash n-grams, and compare all results. 
