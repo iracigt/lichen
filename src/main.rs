@@ -3,13 +3,14 @@ mod frontend;
 mod syntect_frontend;
 mod backend;
 
+use std::collections::hash_map::RandomState;
 use std::path::PathBuf;
 use std::{ffi::OsStr, path::Path};
 use std::fs;
 
 use clap::{App, Arg};
-use backend::{Backend, default_hash};
-use frontend::Submission;
+use backend::Backend;
+use frontend::{Submission, Origin};
 use itertools::Itertools;
 use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
@@ -109,8 +110,8 @@ fn main() {
     let allowed = blessed.iter().map(|d| fs::read_dir(d).unwrap()).flatten().filter_map(|r| {
         r.map_err(|e| e.to_string()).and_then( |e| {
             let path = e.path();
-            let src = frontend::Source::allowed();            
-            Submission::single_file(&fe, src, &path)
+            let origin = frontend::Origin::allowed();            
+            Submission::single_file(&fe, origin, &path)
         }).map_err(|e| println!("ERR: {}", e)).ok()
     }).collect_vec();
 
@@ -120,8 +121,8 @@ fn main() {
             let path = e.path();
             let group = path.parent().and_then(Path::to_str).unwrap_or("unknown");
             let desc = path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
-            let src = frontend::Source::corpus(group, desc);            
-            Submission::single_file(&fe, src, &path)
+            let origin = frontend::Origin::corpus(group, desc);            
+            Submission::single_file(&fe, origin, &path)
         }).map_err(|e| println!("ERR: {}", e)).ok()
     }).collect_vec();
     
@@ -150,7 +151,7 @@ fn main() {
 
         if path.is_dir() {
             let user =  path.file_name().and_then(OsStr::to_str).unwrap_or("unknown");
-            let src = frontend::Source::student(user);
+            let origin = frontend::Origin::student(user);
             let walk = WalkDir::new(path);
             let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
                 .filter_ok(|d| !d.path().is_dir())
@@ -161,15 +162,15 @@ fn main() {
                 filt_regex.as_ref().and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
             });
 
-            Submission::files(&fe, src, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
+            Submission::files(&fe, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
             
         } else {
             let name = path.file_name().and_then(OsStr::to_str);
             let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
-            let src = frontend::Source::student(user);
+            let origin = frontend::Origin::student(user);
 
             if filt_regex.as_ref().and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-                Submission::single_file(&fe, src, &path).map_err(|e| println!("ERR: {}", e)).ok()
+                Submission::single_file(&fe, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
             } else {
                 None
             }
@@ -179,7 +180,7 @@ fn main() {
     let n = matches.value_of("ngram").expect("No ngram length provided")
         .parse().expect("ngram length not an integer");
 
-    let mut backend= Backend::new(n, |n, i| default_hash(n, i));
+    let mut backend= Backend::new(n, RandomState::new());
 
     // submissions.first().unwrap().units().next().unwrap().tokens().for_each(|t| println!("{}", t));
 
@@ -203,8 +204,8 @@ fn main() {
     for sub in &submissions {
         let matches = backend.score_cutoff(sub, thresh_j, thresh_a);
         for m in matches {
-            println!("{:0.03} {:0.03} {} {} {}", 
-                m.jaccard_score(), m.altmin_score(), m.match_count(), m.this(), m.that())
+            println!("{:0.03} {:0.03} {} {} {} {} {}", 
+                m.jaccard_score(), m.altmin_score(), m.match_count(), m.this(), m.count_this, m.that(), m.count_that)
         }
     }
 }

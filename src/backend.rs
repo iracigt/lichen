@@ -1,29 +1,26 @@
 use std::cmp::min;
 use std::collections::HashMap;
-use std::hash::Hash;
+use std::hash::BuildHasher;
 use std::marker::PhantomData;
 
-use itertools::Itertools;
 
-use crate::frontend::{Source, Submission, Token};
-use crate::ngram::{ElemIter, NGramHashIterator};
-
-pub use crate::ngram::default as default_hash;
+use crate::frontend::{Source, Submission, Token, Origin, Location};
+use crate::ngram::NGramHashIterator;
 
 pub struct Match {
-    this: Source,
-    that: Source,
+    this: Origin,
+    that: Origin,
     count_int : usize,
     pub count_this : usize,
     pub count_that : usize,
 }
 
 impl Match {
-    pub fn this(&self) -> &Source {
+    pub fn this(&self) -> &Origin {
         &self.this
     }
 
-    pub fn that(&self) -> &Source {
+    pub fn that(&self) -> &Origin {
         &self.that
     }
 
@@ -32,7 +29,7 @@ impl Match {
     }
 
     pub fn union_count(&self) -> usize {
-        self.count_this + self.count_that - self.count_int
+        self.count_this + self.count_that
     }
 
     pub fn min_count(&self) -> usize {
@@ -48,54 +45,50 @@ impl Match {
     }
 }
 
-pub struct Backend<T, K, H>
+pub struct Backend<T, B>
 where
     T : Token,
-    K : Eq + Hash + Clone,
-    H : Fn(usize, ElemIter<&T>) -> K,
+    B: BuildHasher
 {
     n: usize,
-    map: HashMap<K, Vec<Source>>,
-    counts: HashMap<Source, usize>,
-    hash: H,
-    _pd: PhantomData<fn(T)->K>,
+    map: HashMap<u64, Vec<Source>>,
+    counts: HashMap<Origin, usize>,
+    hash: B,
+    _pd: PhantomData<T>
 }
 
-impl<T, H, K> Backend<T, K, H> 
+impl<T, B> Backend<T, B> 
 where
     T : Token,
-    K : Eq + Hash + Clone,
-    H : for<'r> Fn(usize, ElemIter<'r, &T>) -> K,
+    B: BuildHasher
 {
-    pub fn new(n: usize, hash: H) -> Self {
+    pub fn new(n: usize, hash: B) -> Self {
         Self { 
             n,
             map : HashMap::with_capacity(1<<16),
             counts : HashMap::with_capacity(512),
             hash,
-            _pd: PhantomData,
+            _pd : PhantomData
         }
     }
 
     pub fn populate(&mut self, sub: &Submission<T>) {
-        let src = sub.source().clone();
+        let origin = sub.origin().clone();
 
         let mut count: usize = 0;
 
         for u in sub.units() {
             let hashes = NGramHashIterator::new(u.tokens(), self.n, &self.hash);
 
-            for h in hashes {
+            for (h, l) in hashes {
+                let src = Source::new(origin.clone(), l);
                 let entry = self.map.entry(h).or_insert(vec![]);
-                
-                if !entry.contains(&src) {
-                    entry.push(src.clone());
-                    count += 1;
-                }
+                entry.push(src.clone());
+                count += 1;
             }
         }
 
-        *self.counts.entry(src).or_insert(0) += count;
+        *self.counts.entry(origin).or_insert(0) += count;
     }
 
     pub fn score(&self, sub: &Submission<T>) -> Vec<Match> {
@@ -103,7 +96,7 @@ where
     }
 
     pub fn score_cutoff(&self, sub: &Submission<T>, kj: f32, km: f32) -> Vec<Match> {
-        let this = sub.source();
+        let this = sub.origin();
         let mut count: usize = 0;
 
         let mut matchmap = HashMap::with_capacity(32);
@@ -111,16 +104,16 @@ where
         for u in sub.units() {
             let hashes = NGramHashIterator::new(u.tokens(), self.n, &self.hash);
 
-            for h in hashes.unique() {
+            for (h, _l) in hashes {
                 count += 1;
                 match self.map.get(&h) {
                     Some(hits) => {
-                        // There are many more efficent ways to do this
+                        // There are many more efficient ways to do this
                         // But this was easy
                         if hits.iter().all(|s| !s.is_allowed()) {
                             for hit in hits {
-                                if hit != this {
-                                    *matchmap.entry(hit).or_insert(0) += 1;
+                                if hit.origin() != this {
+                                    *matchmap.entry(hit.origin()).or_insert(0) += 1;
                                 }
                             }
                         }
@@ -131,9 +124,9 @@ where
         }
 
         matchmap.iter().filter_map(|(that, hits)| {
-            let count_that = *self.counts.get(&that).unwrap();
+            let count_that = *self.counts.get(*that).unwrap();
             let count_int = *hits;
-            let count_union = count + count_that - hits;
+            let count_union = count + count_that;
             let count_min = min(count, count_that);
             
             if (count_int as f32) / (count_union as f32) > kj || (count_int as f32) / (count_min as f32) > km {

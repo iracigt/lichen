@@ -12,3 +12,8 @@ itertools = "0.10"
 clap = "2.34.0"
 onig = { version = "6.0", default-features = false }
 walkdir = "2"
+
+[profile.release]
+debug = true
+opt-level = 3
+lto = true
