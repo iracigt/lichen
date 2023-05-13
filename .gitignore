@@ -1,2 +1,5 @@
 /target
 /scrap
+/AppDir
+*.AppImage
+*docker.tar.gz
