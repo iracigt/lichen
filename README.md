@@ -72,7 +72,6 @@ If the language cannot be inferred from the filename (such as when AutoLab renam
 $ lichen --lang OCaml ~/Downloads/submissions
 ```
 
-
 To selectively include files, a regular expression can be provided with the `-f, --filter` option. Only filenames matching the expression will be included. This can be used to exclude Makefiles and other configuration files and only consider source files. Note that this filter is currently only applied to filenames and cannot be used to exclude directories.
 
 ```sh
@@ -85,9 +84,11 @@ For fine tuning of the matching, the ngram length can be configured using `-n, -
 $ lichen -n 12 ~/Downloads/submissions
 ```
 
-Sources may be explicitly allowed with `-b, --bless` which takes a directory containing files with allowed source code (e.g. handout code). This directory is not currently traversed recursively.
+Sources may be explicitly allowed with `-b, --bless` which takes a directory containing files with allowed source code (e.g. handout code).
 
 Similarly, the `-c, --corpus` option allows specification of known disallowed sources, such as submissions from previous semesters. Files included via this option are not scored, but similarity will be measured between provided input files is computed and recorded.
+
+The filter expression (if provided) is applied to files in both the blessed and corpus directories. 
 
 ```sh
 $ lichen -b handout/ -c old_submissions/ ~/Downloads/submissions
