@@ -1,5 +1,5 @@
 
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -39,17 +39,41 @@ impl Origin {
     }
 }
 
-// Deriving PartialOrd is lexographic ordering
+// Deriving PartialOrd is lexicographic ordering
 #[derive(PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub struct FilePos {
     pub line: u32, // Must come first
     pub char: u32  // Must come second
 }
 
+impl Display for FilePos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.line, self.char)
+    }
+}
+
+impl Debug for FilePos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct FileRange {
     pub start: FilePos,
     pub end: FilePos
+}
+
+impl Display for FileRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.start, self.end)
+    }
+}
+
+impl Debug for FileRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -60,6 +84,22 @@ pub enum Location {
     },
     Unknown
 }
+
+impl Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Location::File { name, range } => write!(f, "{}:{}", name, range),
+            Location::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+impl Debug for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct Source {
@@ -114,6 +154,10 @@ impl Source {
         &self.orig
     }
 
+    pub fn location(&self) -> &Location {
+        &self.loc
+    }
+
     pub fn is_allowed(&self) -> bool {
         match &self.orig {
             Origin::Allowed => true,
@@ -126,7 +170,7 @@ impl Display for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
             Self::Student { username } => write!(f, "{}", username),
-            Self::Corpus { group, desc } => write!(f, "{}:{}", group, desc),
+            Self::Corpus { group, desc } => write!(f, "{}::{}", group, desc),
             Self::Allowed => write!(f, "allowed"),
         }
     }

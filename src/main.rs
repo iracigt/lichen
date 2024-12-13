@@ -1,3 +1,4 @@
+mod util;
 mod ngram;
 mod frontend;
 mod syntect_frontend;
@@ -10,7 +11,7 @@ use std::fs;
 
 use clap::{App, Arg};
 use backend::Backend;
-use frontend::{Submission, Origin};
+use frontend::{Location, Origin, Submission};
 use itertools::Itertools;
 use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
@@ -180,7 +181,7 @@ fn main() {
     let n = matches.value_of("ngram").expect("No ngram length provided")
         .parse().expect("ngram length not an integer");
 
-    let mut backend= Backend::new(n, RandomState::new());
+    let mut backend = Backend::new(n, RandomState::new());
 
     // submissions.first().unwrap().units().next().unwrap().tokens().for_each(|t| println!("{}", t));
 
@@ -203,9 +204,12 @@ fn main() {
     
     for sub in &submissions {
         let matches = backend.score_cutoff(sub, thresh_j, thresh_a);
+
         for m in matches {
             println!("{:0.03} {:0.03} {} {} {} {} {}", 
-                m.jaccard_score(), m.altmin_score(), m.match_count(), m.this(), m.count_this, m.that(), m.count_that)
+                m.jaccard_score(), m.altmin_score(), 
+                m.match_count(), m.this(), m.count_this, m.that(), m.count_that, 
+            )
         }
     }
 }

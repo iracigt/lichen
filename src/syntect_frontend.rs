@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
 use std::path::Path;
+use std::vec;
 
 use crate::frontend::{Tokenizer, Token, Location, FileRange, FilePos};
 
@@ -45,45 +46,36 @@ impl Tokenizer<Scope> for SyntectFE {
         let fname = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown");
         let mut parse_state = ParseState::new(syntax);
         let mut tokens = vec!();
+        let mut loc_stack = vec!();
 
-        let mut last_line = 0;
         
         for (line_num, line) in LinesWithEndings::from(&text).enumerate() {
             let ops = parse_state.parse_line(line, &self.ss);
             for (char_num, op) in ops {
                 match op {
                     ScopeStackOp::Push(s) => {
-                        let loc = Location::File { name: fname.to_string(), range: FileRange {
-                            start: FilePos { line: line_num as u32, char: char_num as u32}, 
-                            end: FilePos { line: 0, char: 0},
-                        }};
-                        tokens.push((s, loc))
+                        let start = FilePos { line: line_num as u32 + 1, char: char_num as u32};
+                        loc_stack.push((s, start))
                     },
-                    ScopeStackOp::Pop(_) => { },
+                    ScopeStackOp::Pop(count) => {
+                        for _ in 0..count {
+                            let (s1, start) = loc_stack.pop().unwrap();
+                            let end = FilePos { line: line_num as u32 + 1, char: char_num as u32};
+                            let loc = Location::File { 
+                                name: fname.to_string(), 
+                                range: FileRange { start, end }
+                            };
+                            tokens.push((s1, loc));
+                        }
+                    },
                     ScopeStackOp::Clear(_) => { },
                     ScopeStackOp::Restore => { },
                     ScopeStackOp::Noop => { },
                 }
             }
-            last_line = line_num as u32;
         }
-
-        let (first, rest) = tokens.split_at_mut(1); 
-        
-        let mut last = &mut first[0];
-        for t in rest.iter_mut() {
-            match (&mut last.1, &t.1) {
-                (
-                    Location::File { name: _, range }, 
-                    Location::File { name: _, range: FileRange { start: end, end: _ } }
-                )  => {
-                    range.end = *end
-                }
-                _ => { last.1 = Location::Unknown },
-            }
-
-            last = t;
-        }
+        loc_stack.pop(); // remove bottom source.lang scope
+        debug_assert!(loc_stack.is_empty(), "non-empty token stack {:?}", loc_stack);
 
         tokens
     }
