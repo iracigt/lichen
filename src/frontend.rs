@@ -34,6 +34,14 @@ impl Origin {
     pub fn allowed() -> Self {
         Self::Allowed
     }
+
+    pub fn to_str(&self, arena: &StringArena) -> String {
+        match self {
+            Self::Student { username } => arena.get(*username).unwrap_or("unknown").to_string(),
+            Self::Corpus { group, desc } => format!("{}::{}", arena.get(*group).unwrap_or("unknown"), arena.get(*desc).unwrap_or("unknown")),
+            Self::Allowed => "allowed".to_string(),
+        }
+    }
 }
 
 // Deriving PartialOrd is lexicographic ordering

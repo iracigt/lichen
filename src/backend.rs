@@ -105,49 +105,26 @@ where
         let this = sub.origin();
         let mut count: usize = 0;
 
-        // Here we maintain two different maps to track matches
-        // Both use the origin of the matching hash as they key
-        // `matchmap` tracks all pairs of locations of matching ngrams
-        // `hitmap` simply counts how many matches there are with a given origin
-        // The difference is `hitmap` will only count one match *per ngram*
-        // ngrams that occur in multiple locations within the same files
-        // must appear in `matchmap` once for each pair of locations
-
-
-        let mut matchmap: HashMap<&Origin, Vec<(Location, Location)>, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
         let mut hitmap: HashMap<&Origin, usize, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
-
-        // To avoid using two `NGramHashIterator`s, 
-        // we're going to maintain a seen ngram hashset manually
-        let mut tok_seen = HashMap::with_capacity_and_hasher(256, FxBuildHasher::default());
 
         for u in sub.units() {
             let hashes = NGramHashIterator::new(u.tokens(), self.n, &self.hash);
-            for (h, l) in hashes {
+            for h in hashes.map(|(h, _l)| h).unique() {
                 count += 1;
                 match self.map.get(&h) {
                     Some(hits) => {
                         // There are many more efficient ways to do this
                         // But this was easy
                         if hits.iter().all(|s| !s.is_allowed()) {
-                            for hit in hits {
-                                if hit.origin() != this {
+                            for origin in hits.into_iter().map(Source::origin).unique() {
+                                if  origin != this {
                                     // Profiling was showing this `Vec::push` to be a hotspot
                                     // We'll preallocate space to avoid the first few reallocs
                                     // Note: `Vec::with_capacity` needs to be in a thunk to avoid
                                     // spuriously allocating a vec on every access
-                                    matchmap.entry(hit.origin()).or_insert_with(|| Vec::with_capacity(128)).push((l, *hit.location()));
+                                    *hitmap.entry(origin).or_insert(0) += 1;
                                 }
                             }
-
-                            // Only count hits the first time we see ngram `h`
-                            if tok_seen.contains_key(&h) {
-                                tok_seen.insert(h, ());
-                                for hit in hits.iter().map(|s| s.origin()).unique() {
-                                    *hitmap.entry(hit).or_insert(0) += 1;
-                                }
-                            }
-                            
                         }
                     },
                     None => (),
@@ -158,7 +135,7 @@ where
         hitmap.into_iter().filter_map(|(that, hits)| {
             let count_that = *self.counts.get(that).unwrap();
             let count_int = hits;
-            let count_union = count + count_that;
+            let count_union = count + count_that - hits;
             let count_min = min(count, count_that);
             
             if (count_int as f32) / (count_union as f32) > kj || (count_int as f32) / (count_min as f32) > km {
@@ -171,6 +148,38 @@ where
             } else {
                 None
             }
+        }).collect()
+    }
+
+    fn list_matches(&self, sub: &Submission<T>) -> Vec<(Location, Origin, Location)> {
+
+        let mut matchmap: HashMap<&Origin, Vec<(Location, Location)>, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
+
+        for u in sub.units() {
+            let hashes = NGramHashIterator::new(u.tokens(), self.n, &self.hash);
+            for (h, l) in hashes {
+                match self.map.get(&h) {
+                    Some(hits) => {
+                        if hits.iter().all(|s| !s.is_allowed()) {
+                            for hit in hits {
+                                if hit.origin() != sub.origin() {
+                                    // Profiling was showing this `Vec::push` to be a hotspot
+                                    // We'll preallocate space to avoid the first few reallocs
+                                    // Note: `Vec::with_capacity` needs to be in a thunk to avoid
+                                    // spuriously allocating a vec on every access
+                                    matchmap.entry(hit.origin()).or_insert_with(|| Vec::with_capacity(128)).push((l, *hit.location()));
+                                }
+                            }
+                            
+                        }
+                    },
+                    None => (),
+                }
+            }
+        }
+
+        matchmap.into_iter().flat_map(|(that, hits)| {
+            hits.into_iter().map(|(src, dst)| (src, *that, dst))
         }).collect()
     }
 }

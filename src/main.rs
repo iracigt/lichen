@@ -210,8 +210,9 @@ fn main() {
 
         for m in matches {
             println!("{:0.03} {:0.03} {} {} {} {} {}", 
-                m.jaccard_score(), m.altmin_score(), 
-                m.match_count(), m.this(), m.count_this, m.that(), m.count_that, 
+                m.jaccard_score(), m.altmin_score(), m.match_count(),
+                m.this().to_str(&str_arena), m.count_this,
+                m.that().to_str(&str_arena), m.count_that,
             )
         }
     }
