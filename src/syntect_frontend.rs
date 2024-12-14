@@ -3,6 +3,7 @@ use std::path::Path;
 use std::vec;
 
 use crate::frontend::{Tokenizer, Token, Location, FileRange, FilePos};
+use crate::util::StringArena;
 
 use syntect::parsing::{SyntaxSet, ScopeStack, ParseState, BasicScopeStackOp, Scope, ScopeStackOp};
 use syntect::util::LinesWithEndings;
@@ -37,13 +38,14 @@ impl Token for Scope { }
 
 impl Tokenizer<Scope> for SyntectFE {
 
-    fn tokenize(&self, path: &Path, text: &str) -> Vec<(Scope, Location)> {
+    fn tokenize(&self, str_arena: &mut StringArena, path: &Path, text: &str) -> Vec<(Scope, Location)> {
         
         let syntax = self.ss.find_syntax_by_name(&self.lang).or_else(|| {
             self.ss.find_syntax_by_extension(path.extension().and_then(OsStr::to_str).unwrap_or(""))
         }).unwrap(); // TODO: Fallback to plaintext and return words
 
-        let fname = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown");
+        let fname = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
+        let fname_ref = str_arena.add(fname);
         let mut parse_state = ParseState::new(syntax);
         let mut tokens = vec!();
         let mut loc_stack = vec!();
@@ -62,7 +64,7 @@ impl Tokenizer<Scope> for SyntectFE {
                             let (s1, start) = loc_stack.pop().unwrap();
                             let end = FilePos { line: line_num as u32 + 1, char: char_num as u32};
                             let loc = Location::File { 
-                                name: fname.to_string(), 
+                                name: fname_ref, 
                                 range: FileRange { start, end }
                             };
                             tokens.push((s1, loc));

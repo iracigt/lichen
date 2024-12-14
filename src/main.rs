@@ -16,6 +16,7 @@ use itertools::Itertools;
 use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
 use syntect_frontend::SyntectFE;
+use util::StringArena;
 use walkdir::WalkDir;
 
 const DEF_N : &str = "16";
@@ -23,6 +24,8 @@ const DEF_THRESH_J: &str = "0.8";
 const DEF_THRESH_A: &str = "0.9";
 
 fn main() {
+
+    let mut str_arena = StringArena::new();
 
     let ps = SyntaxSet::load_defaults_newlines();
 
@@ -112,19 +115,19 @@ fn main() {
         r.map_err(|e| e.to_string()).and_then( |e| {
             let path = e.path();
             let origin = frontend::Origin::allowed();            
-            Submission::single_file(&fe, origin, &path)
-        }).map_err(|e| println!("ERR: {}", e)).ok()
+            Submission::single_file(&fe, &mut str_arena, origin, &path)
+        }).map_err(|e| eprintln!("ERR: {}", e)).ok()
     }).collect_vec();
 
     let cursed = matches.values_of("corpus").map_or(vec!(), |v| v.collect_vec());
     let corpus = cursed.iter().map(|d| fs::read_dir(d).unwrap()).flatten().filter_map(|r| {
         r.map_err(|e| e.to_string()).and_then( |e| {
             let path = e.path();
-            let group = path.parent().and_then(Path::to_str).unwrap_or("unknown");
-            let desc = path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
-            let origin = frontend::Origin::corpus(group, desc);            
-            Submission::single_file(&fe, origin, &path)
-        }).map_err(|e| println!("ERR: {}", e)).ok()
+            let group = path.parent().and_then(Path::to_str).unwrap_or("unknown").to_string();
+            let desc = path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
+            let origin = frontend::Origin::corpus(str_arena.add(group), str_arena.add(desc));            
+            Submission::single_file(&fe, &mut str_arena, origin, &path)
+        }).map_err(|e| eprintln!("ERR: {}", e)).ok()
     }).collect_vec();
     
 
@@ -151,8 +154,8 @@ fn main() {
         let path = r.unwrap().path();
 
         if path.is_dir() {
-            let user =  path.file_name().and_then(OsStr::to_str).unwrap_or("unknown");
-            let origin = frontend::Origin::student(user);
+            let user =  path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
+            let origin = frontend::Origin::student(str_arena.add(user));
             let walk = WalkDir::new(path);
             let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
                 .filter_ok(|d| !d.path().is_dir())
@@ -163,15 +166,15 @@ fn main() {
                 filt_regex.as_ref().and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
             });
 
-            Submission::files(&fe, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
+            Submission::files(&fe, &mut str_arena, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
             
         } else {
             let name = path.file_name().and_then(OsStr::to_str);
-            let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown");
-            let origin = frontend::Origin::student(user);
+            let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
 
             if filt_regex.as_ref().and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-                Submission::single_file(&fe, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
+                let origin = frontend::Origin::student(str_arena.add(user));
+                Submission::single_file(&fe, &mut str_arena, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
             } else {
                 None
             }

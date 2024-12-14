@@ -5,33 +5,30 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::fs;
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+use crate::util::{StringArena, StringRef};
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Origin {
     // A student currently in the course
     Student {
-        username: String,
+        username: StringRef,
     },
     // Part of the known existing code
     Corpus {
-        group: String, 
-        desc: String,
+        group: StringRef, 
+        desc: StringRef,
     },
     // Part of the provided (allowable) code
     Allowed,
 }
 
 impl Origin {    
-    pub fn student(username: &str) -> Self {
-        Self::Student {
-            username: username.to_string(),
-        }
+    pub fn student(username: StringRef) -> Self {
+        Self::Student { username }
     }
 
-    pub fn corpus(group: &str, desc: &str) -> Self {
-        Self::Corpus {
-            group: group.to_string(),
-            desc: desc.to_string(),
-        }
+    pub fn corpus(group: StringRef, desc: StringRef) -> Self {
+        Self::Corpus { group, desc }
     }
 
     pub fn allowed() -> Self {
@@ -76,10 +73,10 @@ impl Debug for FileRange {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Location {
     File {
-        name: String,
+        name: StringRef,
         range: FileRange
     },
     Unknown
@@ -88,7 +85,7 @@ pub enum Location {
 impl Display for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Location::File { name, range } => write!(f, "{}:{}", name, range),
+            Location::File { name, range } => write!(f, "{:?}:{}", name, range),
             Location::Unknown => write!(f, "unknown"),
         }
     }
@@ -123,7 +120,7 @@ pub trait Token : Hash { }
 pub trait Tokenizer<T> 
 where
     T : Token {
-    fn tokenize(&self, path: &Path, text: &str) -> Vec<(T, Location)>;
+    fn tokenize(&self, str_arena: &mut StringArena, path: &Path, text: &str) -> Vec<(T, Location)>;
 }
 
 
@@ -169,8 +166,8 @@ impl Source {
 impl Display for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            Self::Student { username } => write!(f, "{}", username),
-            Self::Corpus { group, desc } => write!(f, "{}::{}", group, desc),
+            Self::Student { username } => write!(f, "{:?}", username),
+            Self::Corpus { group, desc } => write!(f, "{:?}::{:?}", group, desc),
             Self::Allowed => write!(f, "allowed"),
         }
     }
@@ -180,11 +177,11 @@ impl<T> CodeUnit<T>
 where
     T : Token
 {
-    pub fn from_path<F : Tokenizer<T>>(t: &F, path: &Path) -> Result<Self, String> {
+    pub fn from_path<F : Tokenizer<T>>(t: &F, str_arena: &mut StringArena, path: &Path) -> Result<Self, String> {
         
         let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
         
-        let tokens = t.tokenize(path, &text);
+        let tokens = t.tokenize(str_arena, path, &text);
         
         Ok(Self {
             filename: path.file_name().and_then(OsStr::to_str).map(&str::to_string),
@@ -202,13 +199,13 @@ impl<T> Submission<T>
 where
     T : Token
 {
-    pub fn single_file<F: Tokenizer<T>>(t: &F, origin: Origin, path: &Path) -> Result<Self, String> {
-        Ok(Self { origin,  units : vec![ CodeUnit::from_path(t, path)? ] } )
+    pub fn single_file<F: Tokenizer<T>>(t: &F, str_arena: &mut StringArena, origin: Origin, path: &Path) -> Result<Self, String> {
+        Ok(Self { origin,  units : vec![ CodeUnit::from_path(t, str_arena, path)? ] } )
     }
 
-    pub fn files<'a, F: Tokenizer<T>, I: Iterator<Item = &'a Path>>(t: &F, origin: Origin, paths: I) -> Result<Self, String> {
-        Ok(Self { origin,  units : paths.map(|p| CodeUnit::from_path(t, p)).collect::<Result<Vec<CodeUnit<T>>, String>>()? } )
-    }
+    pub fn files<'a, F: Tokenizer<T>, I: Iterator<Item = &'a Path>>(t: &F, str_arena: &mut StringArena, origin: Origin, paths: I) -> Result<Self, String> {
+            Ok(Self { origin,  units : paths.map(|p| CodeUnit::from_path(t, str_arena, p)).collect::<Result<Vec<CodeUnit<T>>, String>>()? } )
+        }
 
     pub fn units(&self) -> impl Iterator<Item = &CodeUnit<T>> {
         self.units.iter()
