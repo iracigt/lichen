@@ -1,8 +1,8 @@
 use std::cmp::min;
 use std::collections::HashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::hash::BuildHasher;
 use std::marker::PhantomData;
-
 
 use itertools::Itertools;
 
@@ -58,8 +58,8 @@ where
     B: BuildHasher
 {
     n: usize,
-    map: HashMap<u64, Vec<Source>>,
-    counts: HashMap<Origin, usize>,
+    map: FxHashMap<u64, Vec<Source>>,
+    counts: FxHashMap<Origin, usize>,
     hash: B,
     _pd: PhantomData<T>
 }
@@ -72,15 +72,15 @@ where
     pub fn new(n: usize, hash: B) -> Self {
         Self { 
             n,
-            map : HashMap::with_capacity(1<<16),
-            counts : HashMap::with_capacity(512),
+            map : HashMap::with_capacity_and_hasher(1<<16, FxBuildHasher::default()),
+            counts: HashMap::with_capacity_and_hasher(512, FxBuildHasher::default()),
             hash,
             _pd : PhantomData
         }
     }
 
     pub fn populate(&mut self, sub: &Submission<T>) {
-        let origin = sub.origin().clone();
+        let origin = *sub.origin();
 
         let mut count: usize = 0;
 
@@ -88,8 +88,8 @@ where
             let hashes = NGramHashIterator::new(u.tokens(), self.n, &self.hash);
 
             for (h, l) in hashes {
-                let src = Source::new(origin.clone(), l);
-                self.map.entry(h).or_insert(vec![]).push(src);
+                let src = Source::new(origin, l);
+                self.map.entry(h).or_insert_with(|| Vec::with_capacity(4)).push(src);
                 count += 1;
             }
         }
@@ -114,12 +114,12 @@ where
         // must appear in `matchmap` once for each pair of locations
 
 
-        let mut matchmap = HashMap::<&Origin, Vec<(Location, Location)>, _>::with_capacity(32);
-        let mut hitmap = HashMap::<&Origin, usize, _>::with_capacity(32);
+        let mut matchmap: HashMap<&Origin, Vec<(Location, Location)>, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
+        let mut hitmap: HashMap<&Origin, usize, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
 
         // To avoid using two `NGramHashIterator`s, 
         // we're going to maintain a seen ngram hashset manually
-        let mut tok_seen = HashMap::with_capacity(128);
+        let mut tok_seen = HashMap::with_capacity_and_hasher(256, FxBuildHasher::default());
 
         for u in sub.units() {
             let hashes = NGramHashIterator::new(u.tokens(), self.n, &self.hash);
@@ -132,7 +132,11 @@ where
                         if hits.iter().all(|s| !s.is_allowed()) {
                             for hit in hits {
                                 if hit.origin() != this {
-                                    matchmap.entry(hit.origin()).or_insert(vec![]).push((l.clone(), hit.location().clone()));
+                                    // Profiling was showing this `Vec::push` to be a hotspot
+                                    // We'll preallocate space to avoid the first few reallocs
+                                    // Note: `Vec::with_capacity` needs to be in a thunk to avoid
+                                    // spuriously allocating a vec on every access
+                                    matchmap.entry(hit.origin()).or_insert_with(|| Vec::with_capacity(128)).push((l, *hit.location()));
                                 }
                             }
 
