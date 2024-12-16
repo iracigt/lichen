@@ -9,10 +9,16 @@ license = "AGPL-3.0-only"
 [dependencies]
 syntect = "4.6.0"
 itertools = "0.10"
-clap = "2.34.0"
+clap = "2.34"
 onig = { version = "6.0", default-features = false }
 walkdir = "2"
-rustc-hash = "2.1.0"
+rustc-hash = "2.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_with = { version = "3.11", features = ["base64", "hex"] }
+serde_json = "1.0"
+postcard = { version = "1.1", features = ["use-std"] }
+rand = "0.8"
+git-version = "0.3"
 
 [profile.release]
 debug = true

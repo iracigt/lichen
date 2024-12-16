@@ -36,7 +36,7 @@ impl<'a, T : Hash, I : Iterator<Item = &'a (T, Location)>, B: BuildHasher> Itera
 
         // let h = (self.hash)(self.n, self.reg.iter().map(|(t, _)| t));
 
-        let mut loc = self.reg[0].1.clone();
+        let mut loc = self.reg[0].1;
         
         let mut hasher = self.hash.build_hasher();
 
@@ -57,7 +57,7 @@ fn merge_loc(l1: &Location, l2: &Location) -> Location{
         if let Location::File { name: n2, range: r2 } = l2 {
             if n1 == n2 {
                 Location::File { 
-                    name: n1.clone(),
+                    name: *n1,
                     range: FileRange {
                         start: r1.start.min(r2.start),
                         end: r1.end.max(r2.end)
@@ -73,9 +73,3 @@ fn merge_loc(l1: &Location, l2: &Location) -> Location{
         Location::Unknown
     }       
 }
-
-// pub fn default<T : Hash, I : Iterator<Item = T>>(_: usize, iter: I) -> u64 {
-//     let mut hasher = DefaultHasher::new();
-//     iter.for_each(|x| x.hash(&mut hasher));
-//     hasher.finish()
-// }

@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
@@ -5,9 +6,11 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::fs;
 
+use serde::{Deserialize, Serialize};
+
 use crate::util::{StringArena, StringRef};
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Origin {
     // A student currently in the course
     Student {
@@ -15,7 +18,7 @@ pub enum Origin {
     },
     // Part of the known existing code
     Corpus {
-        group: StringRef, 
+        group: StringRef,
         desc: StringRef,
     },
     // Part of the provided (allowable) code
@@ -35,7 +38,7 @@ impl Origin {
         Self::Allowed
     }
 
-    pub fn to_str(&self, arena: &StringArena) -> String {
+    pub fn to_str<A: StringArena>(&self, arena: &A) -> String {
         match self {
             Self::Student { username } => arena.get(*username).unwrap_or("unknown").to_string(),
             Self::Corpus { group, desc } => format!("{}::{}", arena.get(*group).unwrap_or("unknown"), arena.get(*desc).unwrap_or("unknown")),
@@ -44,11 +47,33 @@ impl Origin {
     }
 }
 
+impl Debug for Origin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Student { username } => write!(f, "Student({:?})", username.0),
+            Self::Corpus { group, desc } => write!(f, "Corpus({:?}, {:?})", group.0, desc.0),
+            Self::Allowed => write!(f, "Allowed"),
+        }
+    }
+}
+
 // Deriving PartialOrd is lexicographic ordering
-#[derive(PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub struct FilePos {
     pub line: u32, // Must come first
     pub char: u32  // Must come second
+}
+
+impl From<(u32, u32)> for FilePos {
+    fn from((line, char): (u32, u32)) -> Self {
+        Self { line, char }
+    }
+}
+
+impl Into<(u32, u32)> for FilePos {
+    fn into(self) -> (u32, u32) {
+        (self.line, self.char)
+    }
 }
 
 impl Display for FilePos {
@@ -63,10 +88,22 @@ impl Debug for FilePos {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct FileRange {
     pub start: FilePos,
     pub end: FilePos
+}
+
+impl From<((u32,u32), (u32,u32))> for FileRange {
+    fn from((start, end): ((u32,u32), (u32,u32))) -> Self {
+        Self { start: start.into(), end: end.into() }
+    }
+}
+
+impl Into<((u32,u32), (u32,u32))> for FileRange {
+    fn into(self) -> ((u32,u32), (u32,u32)) {
+        (self.start.into(), self.end.into())
+    }
 }
 
 impl Display for FileRange {
@@ -81,7 +118,7 @@ impl Debug for FileRange {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Location {
     File {
         name: StringRef,
@@ -106,12 +143,15 @@ impl Debug for Location {
 }
 
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub struct Source {
     orig: Origin,
     loc: Location,
 }
 
+
+
+#[allow(dead_code)]
 pub struct CodeUnit<T> {
     filename: Option<String>,
     contents: String,
@@ -128,7 +168,7 @@ pub trait Token : Hash { }
 pub trait Tokenizer<T> 
 where
     T : Token {
-    fn tokenize(&self, str_arena: &mut StringArena, path: &Path, text: &str) -> Vec<(T, Location)>;
+    fn tokenize<A: StringArena>(&self, str_arena: &mut A, path: &Path, text: &str) -> Vec<(T, Location)>;
 }
 
 
@@ -159,6 +199,7 @@ impl Source {
         &self.orig
     }
 
+    #[allow(dead_code)]
     pub fn location(&self) -> &Location {
         &self.loc
     }
@@ -185,7 +226,7 @@ impl<T> CodeUnit<T>
 where
     T : Token
 {
-    pub fn from_path<F : Tokenizer<T>>(t: &F, str_arena: &mut StringArena, path: &Path) -> Result<Self, String> {
+    pub fn from_path<F : Tokenizer<T>, A: StringArena>(t: &F, str_arena: &mut A, path: &Path) -> Result<Self, String> {
         
         let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
         
@@ -207,11 +248,11 @@ impl<T> Submission<T>
 where
     T : Token
 {
-    pub fn single_file<F: Tokenizer<T>>(t: &F, str_arena: &mut StringArena, origin: Origin, path: &Path) -> Result<Self, String> {
+    pub fn single_file<F: Tokenizer<T>, A: StringArena>(t: &F, str_arena: &mut A, origin: Origin, path: &Path) -> Result<Self, String> {
         Ok(Self { origin,  units : vec![ CodeUnit::from_path(t, str_arena, path)? ] } )
     }
 
-    pub fn files<'a, F: Tokenizer<T>, I: Iterator<Item = &'a Path>>(t: &F, str_arena: &mut StringArena, origin: Origin, paths: I) -> Result<Self, String> {
+    pub fn files<'a, F: Tokenizer<T>, I: Iterator<Item = &'a Path>, A: StringArena>(t: &F, str_arena: &mut A, origin: Origin, paths: I) -> Result<Self, String> {
             Ok(Self { origin,  units : paths.map(|p| CodeUnit::from_path(t, str_arena, p)).collect::<Result<Vec<CodeUnit<T>>, String>>()? } )
         }
 

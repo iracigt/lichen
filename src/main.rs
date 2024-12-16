@@ -7,25 +7,43 @@ mod backend;
 use std::collections::hash_map::RandomState;
 use std::path::PathBuf;
 use std::{ffi::OsStr, path::Path};
-use std::fs;
+use std::fs::{self, File};
 
 use clap::{App, Arg};
 use backend::Backend;
-use frontend::{Location, Origin, Submission};
+use frontend::Submission;
 use itertools::Itertools;
 use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
 use syntect_frontend::SyntectFE;
-use util::StringArena;
+use util::{StringArena, VecStringArena};
 use walkdir::WalkDir;
+
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, base64::Base64};
 
 const DEF_N : &str = "16";
 const DEF_THRESH_J: &str = "0.8";
 const DEF_THRESH_A: &str = "0.9";
 
+use git_version::git_version;
+const GIT_VERSION: &str = git_version!();
+
+#[serde_as]
+#[derive(Serialize, Deserialize)]
+struct TableDump<'a> {
+    lichen_data_version: &'a str,
+    lichen_version: &'a str,
+    #[serde(default)]
+    comment: &'a str,
+    #[serde_as(as = "Base64")]
+    data: Vec<u8>,
+}
+
+
 fn main() {
 
-    let mut str_arena = StringArena::new();
+    let mut str_arena = VecStringArena::new();
 
     let ps = SyntaxSet::load_defaults_newlines();
 
@@ -99,6 +117,13 @@ fn main() {
             .help("the input directory of student submissions")
             .index(1)
             .required(true),
+    )
+    .arg(
+        Arg::with_name("dump table file")
+            .help("dump the (anonymized) hash table to a file")
+            .short("d")
+            .long("dump-table")
+            .number_of_values(1),
     )
     .get_matches();
 
@@ -198,6 +223,16 @@ fn main() {
 
     for sub in &submissions {
         backend.populate(sub);
+    }
+
+    if let Some(dump) = matches.value_of("dump table file") {
+        let file = File::create(dump).expect("Could not create dump file");
+        let tbl = backend.dump_table();
+        serde_json::to_writer(file, &TableDump { data: tbl, 
+            lichen_data_version: "0.0.0", 
+            lichen_version: GIT_VERSION, 
+            comment: "" 
+        }).expect("Could not write dump data");
     }
 
     let thresh_j = matches.value_of("threshold").expect("No threshold provided")

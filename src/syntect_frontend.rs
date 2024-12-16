@@ -5,7 +5,7 @@ use std::vec;
 use crate::frontend::{Tokenizer, Token, Location, FileRange, FilePos};
 use crate::util::StringArena;
 
-use syntect::parsing::{SyntaxSet, ScopeStack, ParseState, BasicScopeStackOp, Scope, ScopeStackOp};
+use syntect::parsing::{SyntaxSet, ParseState, Scope, ScopeStackOp};
 use syntect::util::LinesWithEndings;
 
 pub struct SyntectFE {
@@ -38,7 +38,7 @@ impl Token for Scope { }
 
 impl Tokenizer<Scope> for SyntectFE {
 
-    fn tokenize(&self, str_arena: &mut StringArena, path: &Path, text: &str) -> Vec<(Scope, Location)> {
+    fn tokenize<A: StringArena>(&self, str_arena: &mut A, path: &Path, text: &str) -> Vec<(Scope, Location)> {
         
         let syntax = self.ss.find_syntax_by_name(&self.lang).or_else(|| {
             self.ss.find_syntax_by_extension(path.extension().and_then(OsStr::to_str).unwrap_or(""))

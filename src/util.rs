@@ -1,23 +1,61 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StringRef(usize);
+use serde::{Deserialize, Serialize};
 
-pub struct StringArena {
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StringRef(pub usize);
+
+pub trait StringArena {
+    fn add(&mut self, value: String) -> StringRef;
+    fn get(&self, index: StringRef) -> Option<&str>;
+}
+
+
+pub struct VecStringArena {
     strings: Vec<String>,
 }
 
-impl StringArena {
+impl VecStringArena {
     pub fn new() -> Self {
-        StringArena {
+        Self {
             strings: Vec::new(),
         }
     }
+}
 
-    pub fn add(&mut self, value: String) -> StringRef {
+impl StringArena for VecStringArena {
+    fn add(&mut self, value: String) -> StringRef {
         self.strings.push(value);
         StringRef(self.strings.len() - 1)
     }
 
-    pub fn get(&self, index: StringRef) -> Option<&str> {
+    fn get(&self, index: StringRef) -> Option<&str> {
+        self.strings.get(index.0).map(|s| s.as_str())
+    }
+}
+
+
+
+
+pub struct RandStringArena {
+    strings: Vec<String>,
+}
+
+
+#[allow(dead_code)]
+impl RandStringArena {
+    pub fn new() -> Self {
+        Self {
+            strings: Default::default(),
+        }
+    }
+}
+
+impl StringArena for RandStringArena {
+    fn add(&mut self, _value: String) -> StringRef {
+        self.strings.push(format!("{:08x}", rand::random::<u32>()));
+        StringRef(self.strings.len() - 1)
+    }
+
+    fn get(&self, index: StringRef) -> Option<&str> {
         self.strings.get(index.0).map(|s| s.as_str())
     }
 }
