@@ -34,7 +34,7 @@ impl Match {
     }
 
     pub fn union_count(&self) -> usize {
-        self.count_this + self.count_that
+        self.count_this + self.count_that - self.count_int
     }
 
     pub fn min_count(&self) -> usize {
@@ -113,11 +113,14 @@ where
     pub fn score_cutoff(&self, sub: &Submission<T>, kj: f32, km: f32) -> Vec<Match> {
         let this = sub.origin();
 
+        let mut count_this = 0;
+
         let mut hitmap: HashMap<&Origin, usize, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
 
         for u in sub.units() {
             let hashes = NGramHashIterator::new(u.tokens(), self.inner.n, &self.hash);
             for h in hashes.map(|(h, _l)| h).unique() {
+                count_this += 1;
                 match self.inner.map.get(&h) {
                     Some(hits) => {
                         // There are many more efficient ways to do this
@@ -139,7 +142,7 @@ where
             }
         }
 
-        let count_this = *self.inner.counts.get(this).unwrap();
+        // let count_this = *self.inner.counts.get(this).unwrap_or(&0);
 
         hitmap.into_iter().filter_map(|(that, hits)| {
             let count_that = *self.inner.counts.get(that).unwrap();
@@ -161,7 +164,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn list_matches(&self, sub: &Submission<T>) -> Vec<(Location, Origin, Location)> {
+    pub fn list_matches(&self, sub: &Submission<T>) -> Vec<(Location, Origin, Location)> {
 
         let mut matchmap: HashMap<&Origin, Vec<(Location, Location)>, _> = HashMap::with_capacity_and_hasher(32, FxBuildHasher::default());
 

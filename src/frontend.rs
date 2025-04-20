@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 
 use std::fmt::{Debug, Display};
-use std::hash::Hash;
+use std::{cmp, hash::Hash};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::fs;
@@ -142,6 +142,24 @@ impl Debug for Location {
     }
 }
 
+impl Location {
+    pub fn range(&self) -> Option<&FileRange> {
+        match self {
+            Location::File { range, .. } => Some(range),
+            Location::Unknown => None,
+        }
+    }
+
+    pub fn extend(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Location::File { name: n1, range: r1 }, Location::File { name: n2, range: r2 }) if n1 == n2 => {
+                Location::File { name: *n1, range: FileRange { start: cmp::min(r1.start, r2.start), end: cmp::max(r1.end, r2.end) } }
+            }
+            _ => Location::Unknown,
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub struct Source {
@@ -164,6 +182,9 @@ pub struct Submission<T> {
 }
 
 pub trait Token : Hash { }
+
+impl Token for String { }
+impl Token for char { }
 
 pub trait Tokenizer<T> 
 where
@@ -248,6 +269,19 @@ impl<T> Submission<T>
 where
     T : Token
 {
+    pub fn from_tokens<I: Iterator<Item = T>>(iter: I) -> Self {
+        Self { origin: Origin::Allowed, units: vec![ CodeUnit {
+            filename: None, 
+            contents: String::new(), 
+            tokens: iter.enumerate().map(|(i, t)| (t, Location::File { 
+                name: StringRef(0), 
+                range: FileRange { 
+                    start: FilePos { line: 0, char: i as u32 },
+                    end: FilePos { line: 0, char: i as u32 + 1 }
+                }})).collect()
+        } ] }
+    }
+
     pub fn single_file<F: Tokenizer<T>, A: StringArena>(t: &F, str_arena: &mut A, origin: Origin, path: &Path) -> Result<Self, String> {
         Ok(Self { origin,  units : vec![ CodeUnit::from_path(t, str_arena, path)? ] } )
     }

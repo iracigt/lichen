@@ -2,9 +2,16 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringRef(pub usize);
+pub const EMPTY_STRREF: StringRef = StringRef(0);
+impl Default for StringRef {
+    fn default() -> Self {
+        EMPTY_STRREF
+    }
+}
 
 pub trait StringArena {
     fn add(&mut self, value: String) -> StringRef;
+    // get(EMPTY_STRREF) must return Some("")
     fn get(&self, index: StringRef) -> Option<&str>;
 }
 
@@ -16,7 +23,7 @@ pub struct VecStringArena {
 impl VecStringArena {
     pub fn new() -> Self {
         Self {
-            strings: Vec::new(),
+            strings: vec![ String::new() ],
         }
     }
 }
@@ -44,7 +51,7 @@ pub struct RandStringArena {
 impl RandStringArena {
     pub fn new() -> Self {
         Self {
-            strings: Default::default(),
+            strings: vec![ String::new() ],
         }
     }
 }
@@ -66,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_string_arena() {
-        let mut arena = StringArena::new();
+        let mut arena = VecStringArena::new();
         let hello = arena.add("Hello".to_string());
         let world = arena.add("World".to_string());
 

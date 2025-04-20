@@ -56,13 +56,13 @@ impl Tokenizer<Scope> for SyntectFE {
             for (char_num, op) in ops {
                 match op {
                     ScopeStackOp::Push(s) => {
-                        let start = FilePos { line: line_num as u32 + 1, char: char_num as u32};
+                        let start = FilePos { line: line_num as u32 + 1, char: char_num as u32 + 1};
                         loc_stack.push((s, start))
                     },
                     ScopeStackOp::Pop(count) => {
                         for _ in 0..count {
                             let (s1, start) = loc_stack.pop().unwrap();
-                            let end = FilePos { line: line_num as u32 + 1, char: char_num as u32};
+                            let end = FilePos { line: line_num as u32 + 1, char: char_num as u32 + 1};
                             let loc = Location::File { 
                                 name: fname_ref, 
                                 range: FileRange { start, end }
@@ -70,14 +70,29 @@ impl Tokenizer<Scope> for SyntectFE {
                             tokens.push((s1, loc));
                         }
                     },
-                    ScopeStackOp::Clear(_) => { },
-                    ScopeStackOp::Restore => { },
+                    ScopeStackOp::Clear(_amt) => { 
+                        #[cfg(debug_assertions)]{ todo!("handle ScopeStackOp::Clear({:?})", _amt) } 
+                    },
+                    ScopeStackOp::Restore => { 
+                        #[cfg(debug_assertions)]{ todo!("handle ScopeStackOp::Restore") }
+                    },
                     ScopeStackOp::Noop => { },
                 }
             }
         }
-        loc_stack.pop(); // remove bottom source.lang scope
-        debug_assert!(loc_stack.is_empty(), "non-empty token stack {:?}", loc_stack);
+
+
+        #[cfg(debug_assertions)]
+        {
+            let n = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown");
+            if loc_stack.len() != 1 {
+                eprintln!("WARNING: non-empty token stack for {:?}: {:?}", n, loc_stack);
+            } else if loc_stack.first().map(|(s,l)| (s.build_string(), l)) != Some(("source.ocaml".to_string(), &FilePos { line: 1, char: 1 })) {
+                eprintln!("WARNING: invalid completed token stack for {:?}: {:?}", n, loc_stack);
+            }
+        }
+
+        // debug_assert!(loc_stack.is_empty(), "non-empty token stack {:?}", loc_stack);
 
         tokens
     }
