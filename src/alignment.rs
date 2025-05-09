@@ -1,4 +1,6 @@
-use std::cmp;
+#![allow(unused)]
+
+use std::{cmp, usize};
 
 use crate::frontend::{CodeUnit, Location, Submission, Token};
 
@@ -56,6 +58,46 @@ fn argmax<T: PartialOrd>(a: &Vec<Vec<T>>, max_i: usize, max_j: usize, thresh: &T
     }
 }
 
+/// Find the location of the max value in the matrix,
+/// using a cache `c` of the argmax of each row.
+/// Invalidate cache entry with `usize::MAX` when any element of that row is modified.
+fn rowcache_argmax<T: PartialOrd>(a: &Vec<Vec<T>>, c: &mut Vec<usize>, max_i: usize, max_j: usize, thresh: &T) -> Option<(usize, usize)> {
+
+    for (i, line) in c.iter_mut().enumerate().take(max_i) {
+        if *line == usize::MAX {
+            let mut max = thresh;
+            let mut argmax = 0;
+            let row = &a[i];
+
+            for (j, v) in row.iter().enumerate().take(max_j) {
+                if v > max {
+                    max = v;
+                    argmax = j;
+                }
+            }
+
+            *line = argmax;
+        }
+    }
+
+    let mut max = thresh;
+    let mut argmax = (usize::MAX, usize::MAX);
+    for (i, line) in c.iter().enumerate().take(max_i) {
+        let j = *line;
+        let v = &a[i][j];
+        if v > max {
+            max = v;
+            argmax = (i, j);
+        }
+    }
+
+    if argmax == (usize::MAX, usize::MAX) {
+        None
+    } else {
+        Some(argmax)
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 enum Score {
     Match(i32),
@@ -100,6 +142,7 @@ impl PartialOrd for Score {
         Some(self.cmp(other))
     }
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
     left: Location,
@@ -147,8 +190,9 @@ impl Alignment {
         }
 
         let mut matches = vec!();
+        let mut row_maxes = vec![usize::MAX; n_left + 1];
 
-        while let Some((max_i, max_j)) = argmax(&matrix, n_left + 1, n_right + 1, &Score::Match(thresh)) {
+        while let Some((max_i, max_j)) = rowcache_argmax(&matrix, &mut row_maxes, n_left + 1, n_right + 1, &Score::Match(thresh)) {
 
             if matches.len() as i32 >= max_matches {
                 break;
@@ -191,6 +235,10 @@ impl Alignment {
                 for cell in &mut row[j..=max_j] {
                     *cell = Score::Dead;
                 }
+            }
+
+            for e in &mut row_maxes[i..=max_i] {
+                *e = usize::MAX;
             }
 
             matrix[max_i][max_j] = Score::Dead;
