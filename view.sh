@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PREFIX=. # directory where the files are located
+PREFIX=${PREFIX-"."} # directory where the files are located
 cargo run --release -- align $@ | while read -r ROW ; do
     DATA=$(echo $ROW | tr ':-' '  ' | tr -s ' ')
 
