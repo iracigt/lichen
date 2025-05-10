@@ -2,7 +2,6 @@
 
 use std::fmt::{Debug, Display};
 use std::{cmp, hash::Hash};
-use std::ffi::OsStr;
 use std::path::Path;
 use std::fs;
 
@@ -254,7 +253,7 @@ where
         let tokens = t.tokenize(str_arena, path, &text);
         
         Ok(Self {
-            filename: path.file_name().and_then(OsStr::to_str).map(&str::to_string),
+            filename: path.to_str().map(&str::to_string),
             contents: text,
             tokens,
         })
@@ -269,6 +268,7 @@ impl<T> Submission<T>
 where
     T : Token
 {
+    #[allow(dead_code)]
     pub fn from_tokens<I: Iterator<Item = T>>(iter: I) -> Self {
         Self { origin: Origin::Allowed, units: vec![ CodeUnit {
             filename: None, 

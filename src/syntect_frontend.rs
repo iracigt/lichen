@@ -42,9 +42,12 @@ impl Tokenizer<Scope> for SyntectFE {
         
         let syntax = self.ss.find_syntax_by_name(&self.lang).or_else(|| {
             self.ss.find_syntax_by_extension(path.extension().and_then(OsStr::to_str).unwrap_or(""))
-        }).unwrap(); // TODO: Fallback to plaintext and return words
+        }).expect(&format!(
+            "Unable to autodetect language of {}. Try specifying language with --lang",
+            path.to_str().unwrap_or("???")
+        )); // TODO: Fallback to plaintext and return words
 
-        let fname = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
+        let fname = path.to_str().unwrap_or("unknown").to_string();
         let fname_ref = str_arena.add(fname);
         let mut parse_state = ParseState::new(syntax);
         let mut tokens = vec!();

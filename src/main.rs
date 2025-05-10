@@ -7,21 +7,20 @@ mod alignment;
 
 
 use std::collections::hash_map::RandomState;
-use std::hash::Hash;
+use std::env::{current_dir, set_current_dir};
 use std::path::PathBuf;
-use std::u32;
 use std::{ffi::OsStr, path::Path};
 use std::fs::{self, File};
 
 use alignment::{Alignment, HarshScoring};
 use clap::{Parser, Subcommand};
 use backend::Backend;
-use frontend::{FilePos, FileRange, Location, Origin, Submission};
+use frontend::{FilePos, FileRange, Location, Origin, Submission, Token, Tokenizer};
 use itertools::Itertools;
 use onig::Regex;
 use syntect::parsing::{Scope, SyntaxSet};
 use syntect_frontend::SyntectFE;
-use util::{StringArena, VecStringArena};
+use util::{RandStringArena, StringArena, VecStringArena};
 use walkdir::WalkDir;
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +30,7 @@ const DEF_N : &str = "16";
 const DEF_THRESH_J: &str = "0.8";
 const DEF_THRESH_A: &str = "0.9";
 const DEF_THRESH_ALIGN: &str = "25";
+const DEF_NUM_ALIGN: &str = "5";
 
 use git_version::git_version;
 const GIT_VERSION: &str = git_version!();
@@ -47,19 +47,26 @@ struct TableDump<'a> {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "lichen")]
+#[command(name = "lichen", version = GIT_VERSION, about = "Lichen: A FLOSS software similarity detector", long_about = "Lichen is a tool for finding similarity in student code submissions. Typical usage starts with the analyze command to find pairs of similar submissions and then align to find similar regions within two submissions.")]
 struct LichenCLI {
+    #[arg(short = 'A', long = "anon", help = "anonymize the output")]
+    anon: bool,
     #[command(subcommand)]
     command: LichenCommand,
 }
 
 #[derive(Subcommand, Debug)]
 enum LichenCommand {
-    #[command(name = "analyze", about = "analyze a set of student submissions")]
+    #[command(
+        name = "analyze", 
+        about = "analyze a set of student submissions", 
+        long_about = "Analyze a set of student submissions and report the pairwise similarity scores. Reports as CSV with the following columns:\n\n\
+        jaccard_score, altmin_score, match_count, name1, length1, name2, length2"
+    )]
     Analyze(AnalyzeConfig),
     #[command(name = "tokens", about = "dump tokens from a source file")]
     Tokens(DumpTokensConfig),
-    #[command(name = "compare", about = "compare two submissions")]
+    #[command(name = "compare", about = "compare two submissions and show all matching ngrams")]
     Compare(CompareConfig),
     #[command(name = "find", about = "find a code snippet among the submissions")]
     Find(FindConfig),
@@ -148,10 +155,10 @@ struct AlignConfig {
     #[arg(help = "the second user to compare")]
     right: String,
 
-    #[arg(short = 't', long = "thresh", default_value = DEF_THRESH_ALIGN, help = "set the threshold of matches to report")]
+    #[arg(short = 't', long = "thresh", default_value = DEF_THRESH_ALIGN, help = "set the threshold length of matches to report")]
     thresh: f32,
-    #[arg(long = "num", help = "list only top <num> matches")]
-    num: Option<i32>,
+    #[arg(long = "num", default_value = DEF_NUM_ALIGN, help = "list only top <num> matches")]
+    num: i32,
     
     #[arg(short = 'l', long = "lang", help = "force a frontend language", long_help = lang_help())]
     lang: Option<String>,
@@ -161,21 +168,85 @@ struct AlignConfig {
 
 
 fn main() -> Result<(), String> {
-
-    let mut str_arena = VecStringArena::new();
-
     let args = LichenCLI::parse();
 
-    match args.command {
-        LichenCommand::Analyze(analyze_config) => analyze(&mut str_arena, analyze_config),
-        LichenCommand::Tokens(token_config) => dump_tokens(&mut str_arena, token_config),
-        LichenCommand::Compare(compare_config) => compare(&mut str_arena, compare_config),
-        LichenCommand::Find(find_config) => find(&mut str_arena, find_config),
-        LichenCommand::Align(align_config) => align(&mut str_arena, align_config),
+    if args.anon {
+        run_command(args, &mut RandStringArena::new())
+    } else {
+        run_command(args, &mut VecStringArena::new())
     }
 }
 
-fn compare(str_arena: &mut VecStringArena, cfg: CompareConfig) -> Result<(), String> {
+fn run_command<A: StringArena>(args: LichenCLI, str_arena: &mut A) -> Result<(), String> {
+    match args.command {
+        LichenCommand::Analyze(analyze_config) => analyze(str_arena, analyze_config),
+        LichenCommand::Tokens(token_config) => dump_tokens(str_arena, token_config),
+        LichenCommand::Compare(compare_config) => compare(str_arena, compare_config),
+        LichenCommand::Find(find_config) => find(str_arena, find_config),
+        LichenCommand::Align(align_config) => align(str_arena, align_config),
+    }
+}
+
+fn load_submissions<A, F, T, P>(str_arena: &mut A, fe: &F, root: &Path, pat: Option<&Regex>, pred: P) -> Vec<Submission<T>>
+where
+    A: StringArena,
+    F: Tokenizer<T>,
+    T: Token,
+    P: Fn(&str) -> bool,
+{
+
+    let cwd = current_dir().expect("Could not get current directory");
+    
+    set_current_dir(root).expect("Could not set current directory");
+
+    let ret = fs::read_dir(root).unwrap().filter_map(|r| {
+        let path = r.unwrap().path();
+
+        if path.is_dir() {
+            let user = path.file_name().and_then(OsStr::to_str)
+                .and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
+
+            if pred(&user) {
+                let origin = frontend::Origin::student(str_arena.add(user));
+                let walk = WalkDir::new(&path);
+                let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
+                    .filter_ok(|d| !d.path().is_dir())
+                    .map_ok(|r| r.into_path()).collect::<Result<Vec<PathBuf>, String>>().unwrap();
+            
+                let paths = f.iter().filter(|p| {
+                    let name = p.file_name();
+                    pat.and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
+                }).map(|p| p.strip_prefix(&root).unwrap_or(p));
+
+                Submission::files(fe, str_arena, origin, paths).map_err(|e| println!("ERR: {}", e)).ok()
+            } else {
+                None
+            }
+            
+        } else {
+            let name = path.file_name().and_then(OsStr::to_str);
+            let user = path.file_stem().and_then(OsStr::to_str)
+                .and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
+
+            if pred(&user) {
+                if pat.and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
+                    let origin = frontend::Origin::student(str_arena.add(user));
+                    Submission::single_file(fe, str_arena, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    }).collect();
+
+    set_current_dir(cwd).expect("Could not set current directory");
+
+    ret
+}
+
+fn compare<A: StringArena>(str_arena: &mut A, cfg: CompareConfig) -> Result<(), String> {
     
     let ps = SyntaxSet::load_defaults_newlines();
     let mut fe = SyntectFE::new(ps);
@@ -199,47 +270,8 @@ fn compare(str_arena: &mut VecStringArena, cfg: CompareConfig) -> Result<(), Str
     let filter = cfg.filter.map(|r| Regex::new(&r).expect("invalid regex"));
     let pat = filter.as_ref();
     
-    let mut get_subs = |username: &str| {
-        fs::read_dir(&cfg.input).unwrap().filter_map(|r| {
-            let path = r.unwrap().path();
-    
-            if path.is_dir() {
-                let user = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
-    
-                if user == username {
-                    let origin = frontend::Origin::student(str_arena.add(user));
-                    let walk = WalkDir::new(path);
-                    let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
-                        .filter_ok(|d| !d.path().is_dir())
-                        .map_ok(|r| r.into_path()).collect::<Result<Vec<PathBuf>, String>>().unwrap();
-                
-                    let paths = f.iter().filter(|p| {
-                        let name = p.file_name();
-                        pat.and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
-                    });
-    
-                    Submission::files(&fe, str_arena, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
-                } else {
-                    None
-                }
-            } else {
-                let name = path.file_name().and_then(OsStr::to_str);
-                let user = path.file_stem().and_then(OsStr::to_str)
-                    .and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
-    
-                if user == username
-                    && pat.and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-                    let origin = frontend::Origin::student(str_arena.add(user));
-                    Submission::single_file(&fe, str_arena, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
-                } else {
-                    None
-                }
-            }
-        }).collect()
-    };
-
-    let lefts : Vec<Submission<Scope>> = get_subs(&cfg.left);
-    let rights : Vec<Submission<Scope>> = get_subs(&cfg.right);
+    let lefts : Vec<Submission<Scope>> = load_submissions(str_arena, &fe, Path::new(&cfg.input), pat, |u| u == cfg.left);
+    let rights : Vec<Submission<Scope>> = load_submissions(str_arena, &fe, Path::new(&cfg.input), pat, |u| u == cfg.right);
 
     let mut backend = Backend::new(cfg.n, RandomState::new());
 
@@ -264,7 +296,7 @@ fn compare(str_arena: &mut VecStringArena, cfg: CompareConfig) -> Result<(), Str
     Ok(())
 }
 
-fn dump_tokens(str_arena: &mut VecStringArena, cfg: DumpTokensConfig) -> Result<(), String> {
+fn dump_tokens<A: StringArena>(str_arena: &mut A, cfg: DumpTokensConfig) -> Result<(), String> {
 
     let ps = SyntaxSet::load_defaults_newlines();
     let mut fe = SyntectFE::new(ps);
@@ -287,7 +319,7 @@ fn dump_tokens(str_arena: &mut VecStringArena, cfg: DumpTokensConfig) -> Result<
     Ok(())
 }
 
-fn align(str_arena: &mut VecStringArena, cfg: AlignConfig) -> Result<(), String> {
+fn align<A: StringArena>(str_arena: &mut A, cfg: AlignConfig) -> Result<(), String> {
 
     let ps = SyntaxSet::load_defaults_newlines();
     let mut fe = SyntectFE::new(ps);
@@ -303,65 +335,30 @@ fn align(str_arena: &mut VecStringArena, cfg: AlignConfig) -> Result<(), String>
     let filter = cfg.filter.map(|r| Regex::new(&r).expect("invalid regex"));
     let pat = filter.as_ref();
     
-    let mut get_subs = |username: &str| {
-        fs::read_dir(&cfg.input).unwrap().filter_map(|r| {
-            let path = r.unwrap().path();
     
-            if path.is_dir() {
-                let user = path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
-    
-                if user == username {
-                    let origin = frontend::Origin::student(str_arena.add(user));
-                    let walk = WalkDir::new(path);
-                    let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
-                        .filter_ok(|d| !d.path().is_dir())
-                        .map_ok(|r| r.into_path()).collect::<Result<Vec<PathBuf>, String>>().unwrap();
-                
-                    let paths = f.iter().filter(|p| {
-                        let name = p.file_name();
-                        pat.and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
-                    });
-    
-                    Submission::files(&fe, str_arena, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
-                } else {
-                    None
-                }
-            } else {
-                let name = path.file_name().and_then(OsStr::to_str);
-                let user = path.file_stem().and_then(OsStr::to_str)
-                    .and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
-    
-                if user == username
-                    && pat.and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-                    let origin = frontend::Origin::student(str_arena.add(user));
-                    Submission::single_file(&fe, str_arena, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
-                } else {
-                    None
-                }
-            }
-        }).collect()
-    };
-
-    let lefts : Vec<Submission<Scope>> = get_subs(&cfg.left);
-    let rights : Vec<Submission<Scope>> = get_subs(&cfg.right);
+    let lefts : Vec<Submission<Scope>> = load_submissions(str_arena, &fe, Path::new(&cfg.input), pat, |u| u == cfg.left);
+    let rights : Vec<Submission<Scope>> = load_submissions(str_arena, &fe, Path::new(&cfg.input), pat, |u| u == cfg.right);
 
     if lefts.is_empty() {
         return Err(format!("No submissions found for {}", cfg.left));
+    }
+    if lefts.len() > 1 {
+        return Err(format!("Multiple submissions found for {}", cfg.left));
     }
 
     if rights.is_empty() {
         return Err(format!("No submissions found for {}", cfg.right));
     }
+    if rights.len() > 1 {
+        return Err(format!("Multiple submissions found for {}", cfg.right));
+    }
 
-    // println!("{} {}", 
-    //     lefts.first().unwrap().units().map(|u| u.tokens().count()).sum::<usize>(), 
-    //     rights.first().unwrap().units().map(|u| u.tokens().count()).sum::<usize>()
-    // );
+    let left_sub = lefts.first().expect("left submission not found");
+    let right_sub = rights.first().expect("right submission not found");
 
     let alignment = Alignment::align::<HarshScoring, _>(
-        lefts.first().expect("left submission not found"),
-        rights.first().expect("right submission not found"),
-        cfg.thresh as i32, cfg.num.unwrap_or(i32::MAX),
+        left_sub, right_sub,
+        cfg.thresh as i32, cfg.num,
     );
 
     for m in alignment.matches() {
@@ -394,7 +391,7 @@ fn align(str_arena: &mut VecStringArena, cfg: AlignConfig) -> Result<(), String>
 }
 
 
-fn analyze(str_arena: &mut VecStringArena, cfg: AnalyzeConfig) -> Result<(), String> { 
+fn analyze<A: StringArena>(str_arena: &mut A, cfg: AnalyzeConfig) -> Result<(), String> { 
 
     let ps = SyntaxSet::load_defaults_newlines();
     let mut fe = SyntectFE::new(ps);
@@ -428,44 +425,9 @@ fn analyze(str_arena: &mut VecStringArena, cfg: AnalyzeConfig) -> Result<(), Str
 
     let filter = cfg.filter.map(|r| Regex::new(&r).expect("invalid regex"));
     let pat = filter.as_ref();
-    let submissions : Vec<Submission<Scope>> = fs::read_dir(cfg.input).unwrap().filter_map(|r| {
-        let path = r.unwrap().path();
-
-        if path.is_dir() {
-            let user =  path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
-            let origin = frontend::Origin::student(str_arena.add(user));
-            let walk = WalkDir::new(path);
-            let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
-                .filter_ok(|d| !d.path().is_dir())
-                .map_ok(|r| r.into_path()).collect::<Result<Vec<PathBuf>, String>>().unwrap();
-        
-            let paths = f.iter().filter(|p| {
-                let name = p.file_name();
-                pat.and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
-            });
-
-            Submission::files(&fe, str_arena, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
-            
-        } else {
-            let name = path.file_name().and_then(OsStr::to_str);
-            let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
-
-            if pat.and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-                let origin = frontend::Origin::student(str_arena.add(user));
-                Submission::single_file(&fe, str_arena, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
-            } else {
-                None
-            }
-        }
-    }).collect();
+    let submissions = load_submissions(str_arena, &fe, Path::new(&cfg.input), pat, |_| true);
 
     let mut backend = Backend::new(cfg.n, RandomState::new());
-
-    for sub in &submissions {
-        println!("{} {}", sub.origin().to_str(str_arena), sub.units().next().unwrap().tokens().count());
-    }
-
-    // submissions.first().unwrap().units().next().unwrap().tokens().for_each(|(t, l)| println!("{:?} {}", l.range().unwrap(), t));
 
     for sub in &allowed {
         backend.populate(sub);
@@ -505,7 +467,7 @@ fn analyze(str_arena: &mut VecStringArena, cfg: AnalyzeConfig) -> Result<(), Str
 }
 
 
-fn find(str_arena: &mut VecStringArena, cfg: FindConfig) -> Result<(), String> { 
+fn find<A: StringArena>(str_arena: &mut A, cfg: FindConfig) -> Result<(), String> { 
 
     let ps = SyntaxSet::load_defaults_newlines();
     let mut fe = SyntectFE::new(ps);
@@ -528,36 +490,7 @@ fn find(str_arena: &mut VecStringArena, cfg: FindConfig) -> Result<(), String> {
 
     let filter = cfg.filter.map(|r| Regex::new(&r).expect("invalid regex"));
     let pat = filter.as_ref();
-    let submissions : Vec<Submission<Scope>> = fs::read_dir(cfg.input).unwrap().filter_map(|r| {
-        let path = r.unwrap().path();
-
-        if path.is_dir() {
-            let user =  path.file_name().and_then(OsStr::to_str).unwrap_or("unknown").to_string();
-            let origin = frontend::Origin::student(str_arena.add(user));
-            let walk = WalkDir::new(path);
-            let f = walk.into_iter().map(|x| x.map_err(|e| e.to_string()))
-                .filter_ok(|d| !d.path().is_dir())
-                .map_ok(|r| r.into_path()).collect::<Result<Vec<PathBuf>, String>>().unwrap();
-        
-            let paths = f.iter().filter(|p| {
-                let name = p.file_name();
-                pat.and_then(|r| name.and_then(OsStr::to_str).map(|n| r.is_match(n))).unwrap_or(true)
-            });
-
-            Submission::files(&fe, str_arena, origin, paths.map(PathBuf::as_path)).map_err(|e| println!("ERR: {}", e)).ok()
-            
-        } else {
-            let name = path.file_name().and_then(OsStr::to_str);
-            let user =  path.file_stem().and_then(OsStr::to_str).and_then(|f| f.split("@").next()).unwrap_or("unknown").to_string();
-
-            if pat.and_then(|r| name.map(|n| r.is_match(n))).unwrap_or(true) {
-                let origin = frontend::Origin::student(str_arena.add(user));
-                Submission::single_file(&fe, str_arena, origin, &path).map_err(|e| println!("ERR: {}", e)).ok()
-            } else {
-                None
-            }
-        }
-    }).collect();
+    let submissions = load_submissions(str_arena, &fe, Path::new(&cfg.input), pat, |_| true);
 
     let path = Path::new(&cfg.clue);
 
